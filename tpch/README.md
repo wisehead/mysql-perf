@@ -75,3 +75,16 @@ make
 -s 1 表示生成1G的数据 （如果你之前曾经尝试过生成数据，最好先make clean，再重新make，接着到这步加上-f覆盖掉）
 生成之后可以用head命令检查一下tbl们，会看到每一行都有一些用“|”隔开的字段。
 
+#生成查询语句
+
+```shell
+cp qgen queries
+cp dists.dss queries
+
+#!/usr/bin/bash
+for i in {1..22}
+do  
+  ./qgen -d $i -s 100 > db"$i".sql
+done
+```
+
