@@ -88,3 +88,158 @@ do
 done
 ```
 
+修改初始化ddl脚本
+压缩包内自带两个脚本
+dss.ddl   建表语句
+dss.ri      主键外键语句
+如果需要修改表名为小写，可以使用
+
+```shell
+:%s/TABLE\(.*\)/TABLE\L\1
+
+或者vim 编辑器只读模式下输入ggguG即可所有语句变为小写
+```
+
+建表
+登录mysql执行
+
+```sql
+create database tpch;
+use tpch;
+. ~/tpch_2_16_1/dbgen/dss.ddl
+. ~/tpch_2_16_1/dbgen/dss.ri   
+#主键外键导入建议等数据导入完成后操作，否则数据量大的情况下导入会比较慢
+```
+
+#导入数据
+
+（可以把这些导入操作放到一个文件中，然后使用source 方式执行，也可以自己写脚本执行）
+
+```sql
+load data local INFILE 'customer.tbl' INTO TABLE customer FIELDS TERMINATED BY '|';
+load data local INFILE 'region.tbl' INTO TABLE region FIELDS TERMINATED BY '|';
+load data local INFILE 'nation.tbl' INTO TABLE nation FIELDS TERMINATED BY '|';
+load data local INFILE 'supplier.tbl' INTO TABLE supplier FIELDS TERMINATED BY '|';
+load data local INFILE 'part.tbl' INTO TABLE part FIELDS TERMINATED BY '|';
+load data local INFILE 'partsupp.tbl' INTO TABLE partsupp FIELDS TERMINATED BY '|';
+load data local INFILE 'orders.tbl' INTO TABLE orders FIELDS TERMINATED BY '|';
+load data local INFILE 'lineitem.tbl' INTO TABLE lineitem FIELDS TERMINATED BY '|';
+```
+
+比较大的表可以使用脚本导入
+```shell
+#! /bin/bash
+#文件名不带.tbl ！！！,即对应表名
+#read -p "please input filename: " filename
+filename=orders      # 修改处1：替换文件名orders、partsupp、lineitem、
+
+#数据库配置
+db_host=xxx.xxx.xxx.xx
+db_port=3306
+db_pwd=xxxxxxx
+db_user=xxxx
+#tpch 生成数据的目录
+sql_dir=/root/tpch-mysql/dbgen
+
+
+#获取原文件总行数totalline
+totalline=$(cat $filename.tbl | wc -l)
+echo totalline=$totalline
+#要分割成的每个小文件的行数line
+line=1000000   
+a=`expr $totalline / $line`    
+b=`expr $totalline % $line` 
+#获取小文件个数filenum
+if (( $b==0 ))   
+then
+    filenum=$a
+else
+    filenum=`expr $a + 1`
+fi
+echo filenum=$filenum
+#进行文件分割,分割后第一个小文件名后缀为i,i最小值为1
+i=1        # 修改处2：38 修改为1
+while(( i<=$filenum ))
+do
+#每个小文件要截取行数在原文件范围min,max 
+    p=`expr $i - 1`
+    min=`expr $p \* $line + 1`
+    max=`expr $i \* $line`
+    sed -n "$min,$max"p ./$filename.tbl > ./$filename.tbl.$i
+#将小文件导入数据库，mysql登录信息及小文件路径根据实际修改       # 修改处3：mysql连接信息（加了--local-infile）
+#根据自己创建的数据库的用户名、密码、数据库实例的ip、端口号、已经tpc安装包的路径信息进行修改。
+    mysql -u${db_user} -p${db_pwd} -h${db_host} -P${db_user} --local-infile -Dtpcd -e "load data local infile '${sql_dir}/$filename.tbl.$i' into table $filename fields terminated by '|';"
+    i=`expr $i + 1`
+done
+```
+
+检查导入结果
+```sql
+SHOW TABLE STATUS FROM tpch;
+```
+
+修改执行测试脚本
+```shell
+#!/bin/sh
+PATH=$PATH:/usr/local/bin
+export PATH
+#set -u
+#set -x
+#set -e
+. ~/.bash_profile > /dev/null 2>&1
+exec 3>&1 4>&2 1>> tpch-benchmark-olap-`date +'%Y%m%d%H%M%S'`.log 2>&1
+I=1
+II=3
+while [ $I -le $II ]
+do
+N=1
+T=23
+while [ $N -lt $T ]
+do
+  if [ $N -lt 10 ] ; then
+    NN='0'$N
+  else
+    NN=$N
+  fi
+  echo "query $NN starting"
+# /etc/init.d/mysql restart           # 修改这里mysql连接信息
+  time mysql -h10.185.147.201 -P32307 -umyroot -p****** -Dtpcd < ./queries/db${NN}.sql
+  echo "query $NN ended!"
+  N=`expr $N + 1`
+  echo -e
+  echo -e
+done
+ I=`expr $I + 1`
+done
+
+```
+
+补充下另一种测试脚本
+```shell
+#!/usr/bin/env bash
+host=$1
+port=$2
+user=$3
+password=$4
+database=$5
+resfile=$6
+echo "start test run at"`date "+%Y-%m-%d %H:%M:%S"`|tee -a ${resfile}.out
+for (( i=1; i<=22;i=i+1 ))
+do
+queryfile="Q"${i}".sql"
+start_time=`date "+%s.%N"`
+echo "run query ${i}"|tee -a ${resfile}.out
+mysql -h ${host}  -P${port} -u${user} -p${password} $database -e" source $queryfile;" |tee -a ${resfile}.out
+end_time=`date "+%s.%N"`
+start_s=${start_time%.*}
+start_nanos=${start_time#*.}
+end_s=${end_time%.*}
+end_nanos=${end_time#*.}
+if [ "$end_nanos" -lt "$start_nanos" ];then
+        end_s=$(( 10#$end_s -1 ))
+        end_nanos=$(( 10#$end_nanos + 10 ** 9))
+fi
+time=$(( 10#$end_s - 10#$start_s )).`printf "%03d\n" $(( (10#$end_nanos - 10#$start_nanos)/10**6 ))`
+echo ${queryfile} "the "${j}" run cost "${time}" second start at"`date -d @$start_time "+%Y-%m-%d %H:%M:%S"`" stop at"`date -d @$end_time "+%Y-%m-%d %H:%M:%S"` >> ${resfile}.time
+done
+```
