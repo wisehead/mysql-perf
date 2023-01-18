@@ -67,6 +67,18 @@
 #define SET_DBASE       "CONNECT TO %s ;\n"
 #endif
 
+//B_chenhui
+#ifdef MYSQL
+#define GEN_QUERY_PLAN  ""
+#define START_TRAN      "START TRANSACTION"
+#define END_TRAN        "COMMIT"
+#define SET_OUTPUT      ""
+#define SET_ROWCOUNT    "limit %d;\n"
+#define SET_DBASE       "use %s;\n"
+#endif
+
+//E_chenhui
+
 #ifdef INFORMIX
 #define GEN_QUERY_PLAN  "SET EXPLAIN ON;"
 #define START_TRAN      "BEGIN WORK;"
